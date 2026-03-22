@@ -1,0 +1,5 @@
+py -3.12 --version
+pytpy -3.12 -m venv venv
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+.\venv\Scripts\activate
+python -m streamlit run streamlit_app.py
