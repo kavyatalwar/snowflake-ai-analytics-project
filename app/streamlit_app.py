@@ -4,15 +4,14 @@ import pandas as pd
 import re
 
 # ---------------------------
-# PAGE CONFIG
+# CONFIG
 # ---------------------------
 st.set_page_config(page_title="AI Data Analyst", layout="wide")
 
 # ---------------------------
-# CONNECT TO SNOWFLAKE
+# CONNECTION
 # ---------------------------
 @st.cache_resource
-
 def init_connection():
     return snowflake.connector.connect(
         user=st.secrets["SNOWFLAKE_USER"],
@@ -26,20 +25,19 @@ def init_connection():
 conn = init_connection()
 
 # ---------------------------
-# RUN QUERY FUNCTION
+# QUERY EXECUTION
 # ---------------------------
 def run_query(query):
+    cursor = conn.cursor()
     try:
-        cursor = conn.cursor()
         cursor.execute(query)
         df = pd.DataFrame(cursor.fetchall(), columns=[col[0] for col in cursor.description])
-        cursor.close()
         return df
-    except Exception as e:
-        raise Exception(f"Query failed: {e}")
+    finally:
+        cursor.close()
 
 # ---------------------------
-# CLEAN SQL OUTPUT
+# CLEAN SQL
 # ---------------------------
 def clean_sql(text):
     text = re.sub(r"```sql|```", "", text, flags=re.IGNORECASE)
@@ -48,36 +46,41 @@ def clean_sql(text):
     return text.strip()
 
 # ---------------------------
-# GENERATE SQL USING CORTEX
+# GENERATE SQL
 # ---------------------------
 def generate_sql(question):
     prompt = f"""
-You are a strict SQL generator.
+You are an expert Snowflake SQL generator.
 
-Rules:
-- ONLY return SQL query
-- NO explanation
-- ALWAYS use FULLY QUALIFIED TABLE NAMES
+STRICT RULES:
+- Only return SQL query
+- No explanation
+- Use only given tables
+- Use correct column names
+- Always use FULLY QUALIFIED TABLE NAMES
 
 DATABASE: AI_ANALYTICS_DB
 SCHEMA: GOLD
 
 TABLES:
 
-AI_ANALYTICS_DB.GOLD.FACT_SALES(order_id, product_id, customer_id, order_date, price, freight_value)
+FACT_SALES(order_id, product_id, customer_id, order_date, price, freight_value)
 
-AI_ANALYTICS_DB.GOLD.MONTHLY_SALES(year, month, revenue)
+DIM_PRODUCTS(product_id, product_category_name)
 
-AI_ANALYTICS_DB.GOLD.CUSTOMER_REVENUE(customer_id, total_spent, total_orders)
+CUSTOMER_REVENUE(customer_id, total_spent, total_orders)
 
-AI_ANALYTICS_DB.GOLD.FACT_REVIEWS(order_id, review_score, review_creation_date, review_comment_message)
+MONTHLY_SALES(year, month, revenue)
 
-IMPORTANT:
-- DO NOT invent columns
-- DO NOT change column names
-- ALWAYS prefix tables
-- If random review → ORDER BY RANDOM() LIMIT 1
-- review_score is between 1 and 5
+FACT_REVIEWS(order_id, review_score, review_creation_date, review_comment_message)
+
+RELATIONSHIPS:
+FACT_SALES.product_id = DIM_PRODUCTS.product_id
+
+RULES:
+- For category → join DIM_PRODUCTS
+- For random row → ORDER BY RANDOM() LIMIT 1
+- For top → ORDER BY DESC LIMIT 5
 
 QUESTION:
 {question}
@@ -90,117 +93,129 @@ QUESTION:
     );
     """
 
-    result = run_query(cortex_query)
-    raw_sql = result.iloc[0, 0]
-
-    return clean_sql(raw_sql)
+    df = run_query(cortex_query)
+    return clean_sql(df.iloc[0, 0])
 
 # ---------------------------
-# GENERATE SUMMARY
+# FIX SQL IF ERROR
 # ---------------------------
-def generate_summary(question, df):
-    if df.empty:
-        return "No data available."
-
-    data_sample = df.head(5).to_string(index=False)
-
+def fix_sql(question, bad_sql, error):
     prompt = f"""
-Answer the question using the data provided.
+Fix this SQL query.
 
-Question: {question}
-Data:
-{data_sample}
+Error:
+{error}
 
-Rules:
-- Return ONLY one sentence
-- No brackets
-- No extra comments
-- No formatting suggestions
-- No commas inside numbers
-- No extra text
+Bad SQL:
+{bad_sql}
 
-Example:
-The total number of orders is 112650
+Use correct table names and columns.
+
+Return only fixed SQL.
 """
 
-    cortex_query = f"""
+    query = f"""
     SELECT SNOWFLAKE.CORTEX.COMPLETE(
         'mixtral-8x7b',
         $$ {prompt} $$
     );
     """
 
-    result = run_query(cortex_query)
-    return result.iloc[0, 0].strip()
+    df = run_query(query)
+    return clean_sql(df.iloc[0, 0])
+
+# ---------------------------
+# SAFE EXECUTION (RETRY LOGIC)
+# ---------------------------
+def execute_with_retry(question):
+    sql = generate_sql(question)
+
+    try:
+        df = run_query(sql)
+        return sql, df
+    except Exception as e:
+        try:
+            fixed_sql = fix_sql(question, sql, str(e))
+            df = run_query(fixed_sql)
+            return fixed_sql, df
+        except Exception as e2:
+            raise Exception(f"Failed after retry:\n{e2}")
+
+# ---------------------------
+# SUMMARY
+# ---------------------------
+def generate_summary(question, df):
+    if df.empty:
+        return "No data found."
+
+    data_sample = df.head(5).to_string(index=False)
+
+    prompt = f"""
+Answer the question in one simple sentence.
+
+Question: {question}
+Data:
+{data_sample}
+
+Rules:
+- One sentence only
+- No extra text
+- No formatting suggestions
+"""
+
+    query = f"""
+    SELECT SNOWFLAKE.CORTEX.COMPLETE(
+        'mixtral-8x7b',
+        $$ {prompt} $$
+    );
+    """
+
+    df2 = run_query(query)
+    return df2.iloc[0, 0].strip()
 
 # ---------------------------
 # UI
 # ---------------------------
-st.title("🤖 AI Data Analyst")
-st.markdown("Ask questions about your Snowflake data")
+st.title("AI Data Analyst")
 
-# Chat history
 if "history" not in st.session_state:
     st.session_state.history = []
 
-user_input = st.text_input("💬 Ask your question:")
+question = st.text_input("Ask your question")
 
-if user_input:
+if question:
     try:
-        with st.spinner("🤖 Thinking..."):
+        with st.spinner("Thinking..."):
 
-            # Generate SQL
-            sql_query = generate_sql(user_input)
+            sql, df = execute_with_retry(question)
 
-            # Save history
-            st.session_state.history.append(("User", user_input))
-            st.session_state.history.append(("SQL", sql_query))
+            tab1, tab2, tab3 = st.tabs(["SQL", "Results", "Insight"])
 
-            # Run query
-            df = run_query(sql_query)
-
-            # ---------------------------
-            # TABS UI
-            # ---------------------------
-            tab1, tab2, tab3 = st.tabs(["🧠 SQL", "📊 Results", "💡 Insight"])
-
-            # SQL TAB
             with tab1:
-                st.code(sql_query, language="sql")
+                st.code(sql)
 
-            # RESULTS TAB
             with tab2:
-                if df.empty:
-                    st.warning("No data found.")
-                else:
-                    st.dataframe(df)
+                st.dataframe(df)
 
-                    # Metric view
-                    if df.shape == (1, 1):
-                        st.metric("Result", df.iloc[0, 0])
+                if df.shape == (1, 1):
+                    st.metric("Result", df.iloc[0, 0])
 
-                    # Chart
-                    if len(df.columns) >= 2:
-                        numeric_cols = df.select_dtypes(include='number').columns
-                        if len(numeric_cols) > 0:
-                            st.bar_chart(df.set_index(df.columns[0]))
+                if len(df.columns) >= 2:
+                    st.bar_chart(df.set_index(df.columns[0]))
 
-            # INSIGHT TAB
             with tab3:
-                summary = generate_summary(user_input, df)
-                st.success(summary)
+                st.success(generate_summary(question, df))
+
+            st.session_state.history.append((question, sql))
 
     except Exception as e:
-        st.error("⚠️ Error executing query.")
-        st.code(str(e))
+        st.error(str(e))
 
 # ---------------------------
-# SIDEBAR HISTORY
+# SIDEBAR
 # ---------------------------
-st.sidebar.title("📝 Chat History")
+st.sidebar.title("History")
 
-for role, msg in st.session_state.history[::-1]:
-    if role == "User":
-        st.sidebar.markdown(f"**🧑 {msg}**")
-    else:
-        st.sidebar.code(msg)
+for q, s in reversed(st.session_state.history):
+    st.sidebar.write(q)
+    st.sidebar.code(s)
