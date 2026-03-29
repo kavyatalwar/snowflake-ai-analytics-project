@@ -81,8 +81,7 @@ Raw Data → Snowflake Stage → Bronze → Silver → Gold → AI Agent → Str
 
 ## Live App
 
-[Add your deployed Streamlit link here]
-
+https://ai-data-project.streamlit.app/
 ---
 
 ## How It Works
