@@ -64,21 +64,6 @@ def fast_path_reviews(question):
                 ORDER BY RANDOM()
                 LIMIT 5
                 """
-
-    if "how many" in q and "review" in q:
-        for i in range(1, 6):
-            if str(i) in q:
-                return f"""
-                SELECT COUNT(*) AS total_reviews
-                FROM AI_ANALYTICS_DB.GOLD.FACT_REVIEWS
-                WHERE review_score = {i}
-                """
-
-    if "average" in q and "review" in q:
-        return """
-        SELECT AVG(review_score) AS avg_rating
-        FROM AI_ANALYTICS_DB.GOLD.FACT_REVIEWS
-        """
     return None
 
 # ---------------------------
@@ -90,7 +75,6 @@ def generate_sql(question):
     STRICT RULES:
     - ONLY return SQL starting EXACTLY with SELECT
     - If the question is about reviews, ALWAYS include 'review_score' and 'review_comment_message' in the SELECT.
-    - Use only given tables.
     
     DATABASE: AI_ANALYTICS_DB
     SCHEMA: GOLD
@@ -104,28 +88,35 @@ def generate_sql(question):
     QUESTION:
     {question}
     """
-    cortex_query = f"""
-    SELECT SNOWFLAKE.CORTEX.COMPLETE('mixtral-8x7b', $$ {prompt} $$);
-    """
+    cortex_query = f"SELECT SNOWFLAKE.CORTEX.COMPLETE('mixtral-8x7b', $$ {prompt} $$);"
     df = run_query(cortex_query)
     return clean_sql(df.iloc[0, 0])
 
 # ---------------------------
-# FIX SQL & EXECUTION
+# FETCH MEANING (AI)
 # ---------------------------
-def fix_sql(question, bad_sql, error):
-    prompt = f"Fix this SQL. Error: {error}. Bad SQL: {bad_sql}. Return only SQL."
+def get_meaning(text):
+    prompt = f"""
+    Explain the meaning of this review in one short English sentence: "{text}"
+    Return ONLY the explanation, no headers or extra text.
+    """
     query = f"SELECT SNOWFLAKE.CORTEX.COMPLETE('mixtral-8x7b', $$ {prompt} $$);"
-    df = run_query(query)
-    return clean_sql(df.iloc[0, 0])
+    df_m = run_query(query)
+    return df_m.iloc[0, 0].strip()
 
+# ---------------------------
+# EXECUTION LOGIC
+# ---------------------------
 def execute_with_retry(question):
     sql = generate_sql(question)
     try:
         df = run_query(sql)
         return sql, df
     except Exception as e:
-        fixed_sql = fix_sql(question, sql, str(e))
+        # Simple fix attempt
+        prompt = f"Fix this SQL. Error: {e}. Bad SQL: {sql}."
+        query = f"SELECT SNOWFLAKE.CORTEX.COMPLETE('mixtral-8x7b', $$ {prompt} $$);"
+        fixed_sql = clean_sql(run_query(query).iloc[0, 0])
         df = run_query(fixed_sql)
         return fixed_sql, df
 
@@ -135,10 +126,9 @@ def execute_with_retry(question):
 def generate_summary(question, df):
     if df.empty: return "No data found."
     data_sample = df.head(5).to_string(index=False)
-    prompt = f"Answer in one simple sentence. Question: {question} Data: {data_sample}"
+    prompt = f"Summarize this data for the question '{question}': {data_sample}"
     query = f"SELECT SNOWFLAKE.CORTEX.COMPLETE('mixtral-8x7b', $$ {prompt} $$);"
-    df2 = run_query(query)
-    return df2.iloc[0, 0].strip()
+    return run_query(query).iloc[0, 0].strip()
 
 # ---------------------------
 # UI
@@ -148,11 +138,11 @@ st.title("AI Data Analyst")
 if "history" not in st.session_state:
     st.session_state.history = []
 
-question = st.text_input("Ask your question")
+question = st.text_input("Ask your question (e.g., 'Show me 5 random 1 star reviews')")
 
 if question:
     try:
-        with st.spinner("Thinking..."):
+        with st.spinner("Analyzing Data..."):
             fast_sql = fast_path_reviews(question)
             if fast_sql:
                 sql = fast_sql
@@ -163,44 +153,48 @@ if question:
             tab1, tab2, tab3 = st.tabs(["SQL", "Results", "Insight"])
 
             with tab1:
-                st.code(sql)
+                st.code(sql, language="sql")
 
             with tab2:
-                st.subheader("Data Results")
+                st.subheader("Raw Data Results")
                 st.dataframe(df, use_container_width=True, hide_index=True)
 
                 if "REVIEW_COMMENT_MESSAGE" in df.columns:
                     st.divider()
                     st.subheader("Advanced Review Analysis")
 
-                    # Get data and drop empty messages
-                    review_data = df.dropna(subset=["REVIEW_COMMENT_MESSAGE"]).head(5)
+                    # Processing the top 5 valid reviews
+                    review_subset = df.dropna(subset=["REVIEW_COMMENT_MESSAGE"]).head(5)
                     
                     analysis_rows = []
-                    for _, row in review_data.iterrows():
+                    
+                    # FOR LOOP FOR CUSTOM REQUIREMENTS
+                    for _, row in review_subset.iterrows():
                         msg = row["REVIEW_COMMENT_MESSAGE"]
-                        
-                        # --- SENTIMENT LOGIC BLOCK ---
                         score = row.get("REVIEW_SCORE", 0)
+                        
+                        # 1. IF-ELSE BLOCK FOR SENTIMENT WORD
                         if score >= 4:
                             sentiment_word = "Positive"
                         elif score == 3:
                             sentiment_word = "Neutral"
                         else:
                             sentiment_word = "Negative"
-                        # -----------------------------
-
+                        
+                        # 2. FETCH MEANING IN ENGLISH
+                        meaning_english = get_meaning(msg)
+                        
                         analysis_rows.append({
                             "Review Content": msg,
-                            "Star Rating": score,
-                            "Sentiment": sentiment_word
+                            "Sentiment": sentiment_word,
+                            "Meaning (English)": meaning_english
                         })
 
                     if analysis_rows:
                         sentiment_df = pd.DataFrame(analysis_rows)
                         st.dataframe(sentiment_df, use_container_width=True, hide_index=True)
                     else:
-                        st.write("No review messages found to analyze.")
+                        st.info("No text reviews found to analyze.")
 
             with tab3:
                 st.success(generate_summary(question, df))
@@ -208,12 +202,12 @@ if question:
             st.session_state.history.append((question, sql))
 
     except Exception as e:
-        st.error(str(e))
+        st.error(f"Error executing request: {e}")
 
 # ---------------------------
 # SIDEBAR
 # ---------------------------
 st.sidebar.title("History")
 for q, s in reversed(st.session_state.history):
-    st.sidebar.write(f"**Q:** {q}")
-    st.sidebar.code(s)
+    st.sidebar.markdown(f"**Q:** {q}")
+    st.sidebar.code(s, language="sql")
