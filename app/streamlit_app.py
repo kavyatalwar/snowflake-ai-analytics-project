@@ -53,17 +53,30 @@ def clean_sql(text):
 # ---------------------------
 def fast_path_reviews(question):
     q = question.lower()
+
+    # Extract number from question (default to 1)
+    count_match = re.search(r'\b(\d+)\b', q)
+    count = int(count_match.group(1)) if count_match else 1
+
     if "random" in q and "review" in q:
         for i in range(1, 6):
-            if str(i) in q:
+            if f"{i} star" in q or f"{i}-star" in q:
                 return f"""
                 SELECT review_comment_message, review_score
                 FROM AI_ANALYTICS_DB.GOLD.FACT_REVIEWS
                 WHERE review_score = {i}
                 AND review_comment_message IS NOT NULL
                 ORDER BY RANDOM()
-                LIMIT 1
+                LIMIT {count}
                 """
+        # No specific star rating mentioned — fetch any reviews
+        return f"""
+        SELECT review_comment_message, review_score
+        FROM AI_ANALYTICS_DB.GOLD.FACT_REVIEWS
+        WHERE review_comment_message IS NOT NULL
+        ORDER BY RANDOM()
+        LIMIT {count}
+        """
 
     if "how many" in q and "review" in q:
         for i in range(1, 6):
@@ -81,7 +94,6 @@ def fast_path_reviews(question):
         """
 
     return None
-
 # ---------------------------
 # GENERATE SQL
 # ---------------------------
