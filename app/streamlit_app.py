@@ -251,7 +251,10 @@ if question:
                 st.subheader("Data Results")
                 st.dataframe(df, use_container_width=True, hide_index=True)
 
-                if "REVIEW_COMMENT_MESSAGE" in df.columns and "REVIEW_SCORE" in df.columns:
+                # Only show advanced analysis if user explicitly asked about reviews
+                is_review_question = "review" in question.lower()
+
+                if is_review_question and "REVIEW_COMMENT_MESSAGE" in df.columns and "REVIEW_SCORE" in df.columns:
                     st.divider()
                     st.subheader("Advanced Review Analysis")
 
@@ -273,7 +276,7 @@ if question:
                     })
 
                     st.dataframe(sentiment_df, use_container_width=True, hide_index=True)
-
+            
             with tab3:
                 st.success(generate_summary(question, df))
 
