@@ -192,11 +192,13 @@ def generate_summary(question, df):
 # SENTIMENT ANALYSIS
 # ---------------------------
 def analyze_sentiment(text):
+    # We ask for TWO things separated by a pipe |
     prompt = f"""
-    Classify the sentiment into one word:
-    Positive, Neutral, or Negative.
-    Review:
-    {text}
+    Analyze this review: "{text}"
+    Return exactly in this format: 
+    Word | Explanation
+    
+    Example: Positive | Delivered earlier than expected.
     """
     query = f"""
     SELECT SNOWFLAKE.CORTEX.COMPLETE(
@@ -205,8 +207,15 @@ def analyze_sentiment(text):
     );
     """
     df = run_query(query)
-    return df.iloc[0, 0].strip()
-
+    result = df.iloc[0, 0].strip()
+    
+    # Split the result into the Sentiment Word and the Meaning
+    if "|" in result:
+        parts = result.split("|")
+        return parts[0].strip(), parts[1].strip()
+    else:
+        return result, "N/A"
+    
 # ---------------------------
 # UI
 # ---------------------------
@@ -234,24 +243,34 @@ if question:
                 st.code(sql)
 
             with tab2:
-                st.dataframe(df)
+                st.subheader("Data Results")
+                st.dataframe(df, use_container_width=True)
 
                 if df.shape == (1, 1):
                     st.metric("Result", df.iloc[0, 0])
 
                 if len(df.columns) >= 2:
+                    st.subheader("Data Visualization")
                     st.bar_chart(df.set_index(df.columns[0]))
 
                 if "REVIEW_COMMENT_MESSAGE" in df.columns:
-                    st.subheader("Sentiment Analysis")
-                    sentiments = df["REVIEW_COMMENT_MESSAGE"].dropna().head(5).apply(analyze_sentiment)
+                    st.subheader("Advanced Review Analysis")
 
-                    sentiment_df = pd.DataFrame({
-                        "Review": df["REVIEW_COMMENT_MESSAGE"].head(5),
-                        "Sentiment": sentiments
+                # Process the top 5 reviews
+                active_reviews = df["REVIEW_COMMENT_MESSAGE"].dropna().head(5)
+        
+                 # Apply the function and expand into two columns
+                results = active_reviews.apply(analyze_sentiment)
+        
+                sentiment_df = pd.DataFrame({
+                    "Review Content": active_reviews.values,
+                    "Sentiment": [r[0] for r in results],  # Column 3: The Word (Positive/Negative)
+                    "Intent": [r[1] for r in results]     # Column 4: The Explanation
                     })
-                    st.dataframe(sentiment_df)
 
+                # Display cleanly without the index numbers
+                st.dataframe(sentiment_df, use_container_width=True, hide_index=True)
+            
             with tab3:
                 st.success(generate_summary(question, df))
 
