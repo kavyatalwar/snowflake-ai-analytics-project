@@ -140,6 +140,9 @@ def execute_with_retry(question):
             return fixed_sql, df
         except Exception as e2:
             raise Exception(f"Failed after retry:\n{e2}")
+    
+    if not sql.lower().startswith("select"):
+        raise Exception("Invalid SQL generated")
 
 # ---------------------------
 # SUMMARY
