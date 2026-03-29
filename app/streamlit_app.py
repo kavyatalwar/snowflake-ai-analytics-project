@@ -251,14 +251,17 @@ if question:
                 st.subheader("Data Results")
                 st.dataframe(df, use_container_width=True, hide_index=True)
 
-                # Only show advanced analysis if user explicitly asked about reviews
                 is_review_question = "review" in question.lower()
 
                 if is_review_question and "REVIEW_COMMENT_MESSAGE" in df.columns and "REVIEW_SCORE" in df.columns:
                     st.divider()
                     st.subheader("Advanced Review Analysis")
 
-                    active_reviews = df[["REVIEW_COMMENT_MESSAGE", "REVIEW_SCORE"]].dropna(subset=["REVIEW_COMMENT_MESSAGE"]).head(5)
+                    # Extract count from question dynamically
+                    count_match = re.search(r'\b(\d+)\b', question.lower())
+                    count = int(count_match.group(1)) if count_match else len(df)
+
+                    active_reviews = df[["REVIEW_COMMENT_MESSAGE", "REVIEW_SCORE"]].dropna(subset=["REVIEW_COMMENT_MESSAGE"]).head(count)
 
                     review_contents = []
                     sentiments = []
