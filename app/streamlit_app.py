@@ -174,7 +174,7 @@ def execute_with_retry(question):
 def generate_summary(question, df):
     if df.empty:
         return "No data found."
-    data_sample = df.head(5).to_string(index=False)
+    data_sample = df.head(count).to_string(index=False)
     prompt = f"""
     Answer the question in minimal simple sentence.
     For simple questions, answer directly. For complex questions, analyze the data and provide a concise insight.
