@@ -196,9 +196,8 @@ def analyze_sentiment(text):
     prompt = f"""
     Analyze this review: "{text}"
     Return ONLY the data in this exact format, no headers, no intro:
-    SentimentWord | MeaningOfReview
     
-    Example: Positive | The customer is happy with the product quality.
+    Example: The customer is happy with the product quality.
     """
     query = f"""
     SELECT SNOWFLAKE.CORTEX.COMPLETE(
