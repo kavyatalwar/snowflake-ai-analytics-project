@@ -207,14 +207,6 @@ def analyze_sentiment(text):
     """
     df = run_query(query)
     raw_text = df.iloc[0, 0].strip()
-    
-    # Split by the pipe character
-    if "|" in raw_text:
-        parts = raw_text.split("|")
-        return parts[0].strip(), parts[1].strip()
-    else:
-        # Fallback if the AI is still being chatty
-        return "Neutral", raw_text
         
 # ---------------------------
 # UI
@@ -244,29 +236,29 @@ if question:
 
             with tab2:
                 st.subheader("Data Results")
-                # Using hide_index=True removes that '0' column on the left
                 st.dataframe(df, use_container_width=True, hide_index=True)
 
-                if "REVIEW_COMMENT_MESSAGE" in df.columns:
+                # Check if we have both the message and the score in our results
+                if "REVIEW_COMMENT_MESSAGE" in df.columns and "REVIEW_SCORE" in df.columns:
                     st.divider()
-                    st.subheader("Advanced Review Analysis")
+                    st.subheader("Sentiment Analysis (Based on Rating)")
 
-                 # Analyze the top 5 reviews
-                active_reviews = df["REVIEW_COMMENT_MESSAGE"].dropna().head(5)
-        
-                # Apply the logic and expand the results into two columns
-                results = active_reviews.apply(analyze_sentiment)
+                    # Define the logic block
+                def categorize(score):
+                    if score >= 4: return "Positive"
+                    elif score == 3: return "Neutral"
+                    else: return "Negative"
+
+                    # Create the new columns based on existing data
+                    analysis_df = df[["REVIEW_COMMENT_MESSAGE", "REVIEW_SCORE"]].copy()
+                    analysis_df["Sentiment"] = analysis_df["REVIEW_SCORE"].apply(categorize)
                     
-                # Create the final 4-column dataframe
-                sentiment_df = pd.DataFrame({
-                    "Review Content": active_reviews.values,
-                    "Sentiment": [r[0] for r in results],  # Column 3
-                    "Meaning": [r[1] for r in results]     # Column 4
-                })
+                    # Rename for a cleaner look
+                    analysis_df.columns = ["Review Content", "Star Rating", "Sentiment"]
 
-                # Display cleanly
-                st.dataframe(sentiment_df, use_container_width=True, hide_index=True)
-            
+                    # Display the final table
+                    st.dataframe(analysis_df, use_container_width=True, hide_index=True)
+                
             with tab3:
                 st.success(generate_summary(question, df))
 
