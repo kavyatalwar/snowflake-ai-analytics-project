@@ -176,7 +176,8 @@ def generate_summary(question, df):
         return "No data found."
     data_sample = df.head(5).to_string(index=False)
     prompt = f"""
-    Answer the question in one simple sentence.
+    Answer the question in minimal simple sentence.
+    For simple questions, answer directly. For complex questions, analyze the data and provide a concise insight.
     Question: {question}
     Data:
     {data_sample}
@@ -264,7 +265,7 @@ if question:
                         cleaned_question = re.sub(r'\b([1-5])\s*[-]?\s*star', '', question.lower())
                         count_match = re.search(r'\b(\d+)\b', cleaned_question)
                         count = int(count_match.group(1)) if count_match else len(df)
-                        
+
                     active_reviews = df[["REVIEW_COMMENT_MESSAGE", "REVIEW_SCORE"]].dropna(subset=["REVIEW_COMMENT_MESSAGE"]).head(count)
 
                     review_contents = []
