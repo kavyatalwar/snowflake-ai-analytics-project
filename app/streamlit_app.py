@@ -257,8 +257,9 @@ if question:
                     st.divider()
                     st.subheader("Advanced Review Analysis")
 
-                    # Extract count from question dynamically
-                    count_match = re.search(r'\b(\d+)\b', question.lower())
+                    # Remove star rating references before extracting count
+                    cleaned_question = re.sub(r'\b([1-5])\s*[-]?\s*star', '', question.lower())
+                    count_match = re.search(r'\b(\d+)\b', cleaned_question)
                     count = int(count_match.group(1)) if count_match else len(df)
 
                     active_reviews = df[["REVIEW_COMMENT_MESSAGE", "REVIEW_SCORE"]].dropna(subset=["REVIEW_COMMENT_MESSAGE"]).head(count)
