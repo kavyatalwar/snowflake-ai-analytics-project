@@ -42,8 +42,15 @@ def run_query(query):
 def clean_sql(text):
     text = re.sub(r"```sql|```", "", text, flags=re.IGNORECASE)
     text = text.replace("\\", "")
-    text = text.replace(";", "")
-    return text.strip()
+    text = text.strip()
+
+    # 🔥 Extract SQL starting from SELECT
+    match = re.search(r"(SELECT .*?)$", text, re.IGNORECASE | re.DOTALL)
+
+    if match:
+        return match.group(1).strip()
+
+    return text
 
 # ---------------------------
 # GENERATE SQL
@@ -53,11 +60,13 @@ def generate_sql(question):
 You are an expert Snowflake SQL generator.
 
 STRICT RULES:
-- Only return SQL query
-- No explanation
 - Use only given tables
 - Use correct column names
 - Always use FULLY QUALIFIED TABLE NAMES
+- ONLY return SQL query starting with SELECT
+- DO NOT include any text before SELECT
+- DO NOT include explanation
+- DO NOT include words like "The query is"
 
 DATABASE: AI_ANALYTICS_DB
 SCHEMA: GOLD
